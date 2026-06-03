@@ -131,7 +131,15 @@
       "Bash(where gh *)",
       "Bash(dir \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\")",
       "Bash(dir \"C:\\\\Program Files \\(x86\\)\\\\GitHub CLI\\\\gh.exe\")",
-      "Bash(mvn compile *)"
+      "Bash(mvn compile *)",
+      "Bash(git commit -m 'feat: entity relationships, custom exceptions, MockMvc tests, @Transactional, README *)",
+      "Bash(mv src/main/java/com/example/logistics/demo src/main/java/com/example/logistics/lastmile)",
+      "Bash(mv src/test/java/com/example/logistics/demo src/test/java/com/example/logistics/lastmile)",
+      "Bash(sed -i 's/logistics-demo/lastmile/g' pom.xml README.md)",
+      "Bash(sed -i 's/logistics\\\\.demo/lastmile/g' pom.xml)",
+      "Bash(cd *)",
+      "Bash(./mvnw clean *)",
+      "Bash(git commit -m 'refactor: rename project from logistics-demo to lastmile *)"
     ]
   }
 }

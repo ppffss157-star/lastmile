@@ -1,4 +1,4 @@
-# logistics-demo :package: Spring Boot 物流配送管理系统
+# lastmile :package: Spring Boot 物流配送管理系统
 
 [![Java](https://img.shields.io/badge/Java-17-blue)](https://adoptium.net/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.5-brightgreen)](https://spring.io/projects/spring-boot)
@@ -50,8 +50,8 @@ A production-ready logistics order management REST API built with **Spring Boot 
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-org/logistics-demo.git
-cd logistics-demo
+git clone https://github.com/your-org/lastmile.git
+cd lastmile
 
 # 2. Start all services (MySQL + Redis + App)
 docker-compose up -d
