@@ -1,8 +1,8 @@
 # lastmile :package: Spring Boot 物流配送管理系统
 
-[![Java](https://img.shields.io/badge/Java-17-blue)](https://adoptium.net/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.5-brightgreen)](https://spring.io/projects/spring-boot)
-[![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+![Java](https://img.shields.io/badge/Java-17-blue)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.5-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 A production-ready logistics order management REST API built with **Spring Boot 4.0.5** and **Java 17**. Features JWT authentication, Redis distributed caching and locking, AOP logging, WebSocket real-time push, scheduled tasks, and comprehensive unit tests.
 
