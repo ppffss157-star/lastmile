@@ -15,6 +15,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.example.logistics.demo.dto.CreateOrderRequest;
 import com.example.logistics.demo.dto.OrderNotification;
@@ -33,6 +34,7 @@ import com.example.logistics.demo.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 
 @Service
+@Transactional
 @RequiredArgsConstructor
 public class OrderService {
 

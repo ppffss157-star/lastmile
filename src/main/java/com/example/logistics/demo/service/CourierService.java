@@ -3,6 +3,7 @@ package com.example.logistics.demo.service;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.example.logistics.demo.dto.CreateCourierRequest;
 import com.example.logistics.demo.dto.UpdateCourierRequest;
@@ -19,6 +20,7 @@ public class CourierService {
 
     private final CourierRepository courierRepository;
 
+    @Transactional
     public Courier create(CreateCourierRequest request) {
         Courier courier = new Courier();
         courier.setName(request.getName());
@@ -37,6 +39,7 @@ public class CourierService {
                 .orElseThrow(() -> new CourierNotFoundException());
     }
 
+    @Transactional
     public Courier update(Long id, UpdateCourierRequest request) {
         Courier courier = courierRepository.findById(id)
                 .orElseThrow(() -> new CourierNotFoundException());
@@ -47,6 +50,7 @@ public class CourierService {
         return courierRepository.save(courier);
     }
 
+    @Transactional
     public void deleteById(Long id) {
         if (!courierRepository.existsById(id)) {
             throw new CourierNotFoundException();
