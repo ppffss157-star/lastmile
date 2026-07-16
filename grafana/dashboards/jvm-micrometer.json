@@ -1,0 +1,237 @@
+{
+  "title": "LastMile JVM 监控",
+  "description": "Spring Boot 应用实时指标：内存、CPU、GC、HTTP 请求、线程",
+  "tags": ["jvm", "spring-boot", "lastmile"],
+  "refresh": "10s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "运行时长",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 3 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green", "value": null }] },
+          "unit": "s"
+        }
+      },
+      "targets": [
+        {
+          "expr": "process_uptime_seconds{application=\"lastmile\"}",
+          "legendFormat": "uptime"
+        }
+      ],
+      "options": { "graphMode": "none", "colorMode": "background" }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "活跃线程",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 3 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 200 },
+              { "color": "red", "value": 500 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "jvm_threads_live_threads{application=\"lastmile\"}",
+          "legendFormat": "live threads"
+        }
+      ],
+      "options": { "graphMode": "area", "colorMode": "value" }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "已加载类数",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 3 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "jvm_classes_loaded_classes{application=\"lastmile\"}",
+          "legendFormat": "classes"
+        }
+      ],
+      "options": { "graphMode": "area", "colorMode": "value" }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "堆内存使用率",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 3 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent",
+          "max": 100,
+          "min": 0,
+          "decimals": 1
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(jvm_memory_used_bytes{application=\"lastmile\", area=\"heap\"}) / sum(jvm_memory_max_bytes{application=\"lastmile\", area=\"heap\"}) * 100",
+          "legendFormat": "heap usage %"
+        }
+      ],
+      "options": { "graphMode": "area", "colorMode": "value" }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "CPU 使用率 (%)",
+      "gridPos": { "x": 0, "y": 3, "w": 8, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": true }
+        }
+      },
+      "targets": [
+        {
+          "expr": "system_cpu_usage{application=\"lastmile\"} * 100",
+          "legendFormat": "System CPU"
+        },
+        {
+          "expr": "process_cpu_usage{application=\"lastmile\"} * 100",
+          "legendFormat": "Process CPU"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "JVM 堆内存",
+      "gridPos": { "x": 8, "y": 3, "w": 8, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": true }
+        }
+      },
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{application=\"lastmile\", area=\"heap\"}",
+          "legendFormat": "Used — {{id}}"
+        },
+        {
+          "expr": "jvm_memory_max_bytes{application=\"lastmile\", area=\"heap\"}",
+          "legendFormat": "Max — {{id}}"
+        }
+      ],
+      "description": "Eden=新对象诞生地，Old=熬过多轮 GC 的老对象，Survivor=GC 时暂存的存活对象"
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "非堆内存",
+      "gridPos": { "x": 0, "y": 11, "w": 8, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": true }
+        }
+      },
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{application=\"lastmile\", area=\"nonheap\"}",
+          "legendFormat": "Used — {{id}}"
+        }
+      ],
+      "description": "Metaspace=类元数据（原永久代），Code Cache=JIT 编译缓存，Compressed Class Space=压缩指针存类信息"
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "GC 停顿时间 (s)",
+      "gridPos": { "x": 8, "y": 11, "w": 8, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": true }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(jvm_gc_pause_seconds_sum{application=\"lastmile\"}[1m]) / rate(jvm_gc_pause_seconds_count{application=\"lastmile\"}[1m])",
+          "legendFormat": "{{action}} — {{cause}}"
+        }
+      ],
+      "description": "每次 GC 的平均停顿时间。G1 目标 < 200ms（0.2s）"
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "HTTP 请求速率 (req/s)",
+      "gridPos": { "x": 0, "y": 19, "w": 8, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "spanNulls": true, "stacking": { "mode": "normal" } }
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(http_server_requests_seconds_count{application=\"lastmile\"}[1m])",
+          "legendFormat": "{{method}} {{uri}} ({{status}})"
+        }
+      ],
+      "description": "每秒请求数，按接口和方法分组"
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "HTTP 响应时间 P95",
+      "gridPos": { "x": 8, "y": 19, "w": 8, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "spanNulls": true }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{application=\"lastmile\"}[1m])) by (le, uri, method))",
+          "legendFormat": "{{method}} {{uri}}"
+        }
+      ],
+      "description": "95% 的请求在这个时间内完成。用 histogram_quantile() 从直方图桶推算"
+    }
+  ],
+  "schemaVersion": 39
+}

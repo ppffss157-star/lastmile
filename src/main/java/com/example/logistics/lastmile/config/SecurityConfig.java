@@ -6,6 +6,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -14,10 +16,16 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
     public WebSecurityCustomizer webSecurityCustomizer() {
-        // Swagger 文档 + WebSocket 握手（SockJS 的 HTTP 请求不需要 JWT）
+        // Swagger、WebSocket、Actuator（Prometheus 端点）不需要 JWT
+        // 生产环境应该单独保护 /actuator，比如只允许内网 IP 访问
         return web -> web.ignoring().requestMatchers(
-                "/swagger-ui/**", "/v3/api-docs/**", "/ws/**");
+                "/swagger-ui/**", "/v3/api-docs/**", "/ws/**", "/actuator/**");
     }
 
     @Bean
@@ -26,7 +34,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/auth/login", "/ws/**", "/websocket-test.html").permitAll()
+                .requestMatchers("/auth/login", "/auth/refresh", "/ws/**", "/websocket-test.html").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(new JwtFilter(), UsernamePasswordAuthenticationFilter.class);

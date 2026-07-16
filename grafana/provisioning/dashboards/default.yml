@@ -1,0 +1,10 @@
+# Grafana Provisioning — 自动加载仪表盘 JSON
+apiVersion: 1
+
+providers:
+  - name: 'lastmile-dashboards'
+    type: file
+    folder: 'LastMile'                     # 在 Grafana 里归类到一个文件夹
+    options:
+      path: /var/lib/grafana/dashboards    # JSON 文件存放目录
+      foldersFromFilesStructure: false

@@ -1,0 +1,31 @@
+# =====================================================
+# Prometheus 配置 — 抓取 Spring Boot 应用的指标
+# =====================================================
+
+global:
+  # 每 15 秒抓一次（默认 1 分钟，调快一点好看实时变化）
+  scrape_interval: 15s
+  # 评估告警规则间隔
+  evaluation_interval: 15s
+  # 给每条指标打上外部标签（标识这是哪个集群/Prometheus 实例）
+  external_labels:
+    monitor: lastmile-monitor
+
+# 抓取目标配置
+scrape_configs:
+  # ---- 抓取我们自己的 Spring Boot 应用 ----
+  - job_name: 'lastmile-app'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      # 应用本机跑，Prometheus 在 Docker 里，用 host.docker.internal 访问宿主机
+      - targets:
+          - 'host.docker.internal:8080'
+        labels:
+          environment: 'development'
+          application: 'lastmile'
+
+  # ---- 抓取 Prometheus 自身的指标（可选，看看 Prometheus 自己健不健康）----
+  - job_name: 'prometheus'
+    static_configs:
+      - targets:
+          - 'localhost:9090'

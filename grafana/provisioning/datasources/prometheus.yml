@@ -1,0 +1,15 @@
+# Grafana Provisioning — 自动注册 Prometheus 数据源
+# 容器启动时 Grafana 自动读取这个目录，不需要手动配置
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy          # Grafana 后端代理请求（浏览器 → Grafana → Prometheus）
+    # 本机开发用 host.docker.internal 访问宿主机端口映射
+    # Docker Compose 部署时改回 http://prometheus:9090（同网络 DNS）
+    url: http://host.docker.internal:9090
+    isDefault: true        # 设为首选数据源，新建面板默认用它
+    editable: false        # UI 里不能改，防止手滑。要改就来改这个文件
+    jsonData:
+      timeInterval: 15s    # 默认查询步长

@@ -54,6 +54,44 @@ services:
       redis:
         condition: service_healthy
 
+  # ===== Prometheus — 指标收集 =====
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: logistics-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'   # 数据保留 15 天
+    depends_on:
+      - app
+
+  # ===== Grafana — 可视化看板 =====
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: logistics-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin        # 开发环境简单密码，生产改成 secrets
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # 自动配置数据源和仪表盘（Grafana Provisioning 机制）
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
 volumes:
   mysql-data:
   redis-data:
+  prometheus-data:
+  grafana-data:
