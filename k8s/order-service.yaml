@@ -1,0 +1,89 @@
+# ============================
+# K8s 环境配置覆盖
+# ============================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-service-config
+  namespace: lastmile
+data:
+  application-k8s.yml: |
+    courier:
+      service:
+        url: http://courier-service:9092
+    logging:
+      level:
+        com.example.order: debug
+
+---
+# ============================
+# Deployment
+# ============================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: lastmile
+  labels:
+    app: order-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      containers:
+        - name: order-service
+          image: order-service:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 9091
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:mysql://host.docker.internal:3306/logistics_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
+            - name: SPRING_DATASOURCE_USERNAME
+              value: root
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: mysql-root-password
+            - name: SPRING_PROFILES_ACTIVE
+              value: k8s
+            - name: SPRING_CONFIG_IMPORT
+              value: optional:file:/etc/config/application-k8s.yml
+          volumeMounts:
+            - name: config
+              mountPath: /etc/config
+              readOnly: true
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: config
+          configMap:
+            name: order-service-config
+
+---
+# ============================
+# Service
+# ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: lastmile
+spec:
+  selector:
+    app: order-service
+  ports:
+    - port: 9091
+      targetPort: 9091

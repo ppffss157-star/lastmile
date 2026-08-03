@@ -1,0 +1,88 @@
+# ============================
+# K8s 环境路由配置
+# ============================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: lastmile
+data:
+  application-k8s.yml: |
+    spring:
+      cloud:
+        gateway:
+          routes:
+            - id: order-service
+              uri: http://order-service:9091
+              predicates:
+                - Path=/api/orders/**,/api/saga/**
+            - id: courier-service
+              uri: http://courier-service:9092
+              predicates:
+                - Path=/api/couriers/**
+
+---
+# ============================
+# Deployment
+# ============================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: lastmile
+  labels:
+    app: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: gateway:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: k8s
+            - name: SPRING_CONFIG_IMPORT
+              value: optional:file:/etc/config/application-k8s.yml
+          volumeMounts:
+            - name: config
+              mountPath: /etc/config
+              readOnly: true
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: config
+          configMap:
+            name: gateway-config
+
+---
+# ============================
+# Service
+# ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: lastmile
+spec:
+  type: NodePort
+  selector:
+    app: gateway
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080

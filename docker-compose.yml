@@ -35,24 +35,154 @@ services:
       timeout: 5s
       retries: 5
 
-  # ===== 物流应用 =====
+  # ===== 单体应用（保留对照） =====
   app:
     build: .
     container_name: logistics-app
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "9090:9090"
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/logistics_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: 123456
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: admin
+      SPRING_RABBITMQ_PASSWORD: admin123
+      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
+      NACOS_SERVER_ADDR: nacos:8848
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+  # ===== 订单服务（微服务） =====
+  order-service:
+    build: ./order-service
+    container_name: logistics-order-service
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/logistics_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 123456
+      COURIER_SERVICE_URL: http://courier-service:9092
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ===== 骑手服务（微服务） =====
+  courier-service:
+    build: ./courier-service
+    container_name: logistics-courier-service
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/logistics_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: 123456
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ===== API 网关 — 统一入口 =====
+  gateway:
+    build: ./gateway
+    container_name: logistics-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # 路由到微服务（容器名 = 主机名）
+      SPRING_CLOUD_GATEWAY_ROUTES_0_URI: http://order-service:9091
+      SPRING_CLOUD_GATEWAY_ROUTES_1_URI: http://courier-service:9092
+    depends_on:
+      - order-service
+      - courier-service
+
+  # ===== RabbitMQ — 消息队列 =====
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: logistics-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"     # AMQP 协议端口（程序连这个）
+      - "15672:15672"   # 管理后台端口（浏览器看这个）
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===== Elasticsearch — 全文搜索引擎 =====
+  elasticsearch:
+    image: elasticsearch:8.17.0
+    container_name: logistics-elasticsearch
+    restart: unless-stopped
+    ports:
+      - "9200:9200"     # REST API 端口
+      - "9300:9300"     # 节点间通信端口
+    environment:
+      discovery.type: single-node              # 单节点模式（开发用，生产要配集群）
+      xpack.security.enabled: "false"          # 关闭 X-Pack 安全（开发不用密码）
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"        # 限制堆内存，别把 Docker 吃光
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q 'green\\|yellow'"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 40s      # ES 启动慢（Java 进程），给 40 秒
+
+  # ===== Kibana — ES 可视化工具 =====
+  kibana:
+    image: kibana:8.17.0
+    container_name: logistics-kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  # ===== Nacos — 服务注册发现 + 配置中心 =====
+  nacos:
+    image: nacos/nacos-server:v2.4.0
+    container_name: logistics-nacos
+    restart: unless-stopped
+    ports:
+      - "8848:8848"     # HTTP 控制台 + 客户端通信
+      - "9848:9848"     # gRPC 端口（Nacos 2.x 客户端默认用 gRPC）
+    environment:
+      MODE: standalone          # 单机模式（生产要配集群）
+    volumes:
+      - nacos-data:/home/nacos/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8848/nacos/v1/console/health/readiness | grep -q 'ok'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # ===== Prometheus — 指标收集 =====
   prometheus:
@@ -69,7 +199,8 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=15d'   # 数据保留 15 天
     depends_on:
-      - app
+      - order-service
+      - courier-service
 
   # ===== Grafana — 可视化看板 =====
   grafana:
@@ -90,8 +221,22 @@ services:
     depends_on:
       - prometheus
 
+  # ===== Zipkin — 分布式链路追踪可视化 =====
+  zipkin:
+    image: openzipkin/zipkin:3.4
+    container_name: logistics-zipkin
+    restart: unless-stopped
+    ports:
+      - "9411:9411"     # Web UI + Span 上报接口
+    environment:
+      STORAGE_TYPE: mem                  # 内存存储（开发够用）
+      QUERY_LOOKBACK: 604800000          # 查询窗口 7 天（毫秒）
+
 volumes:
   mysql-data:
   redis-data:
+  rabbitmq-data:
+  es-data:
+  nacos-data:
   prometheus-data:
   grafana-data:

@@ -1,0 +1,59 @@
+# ============================
+# Deployment
+# ============================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: courier-service
+  namespace: lastmile
+  labels:
+    app: courier-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: courier-service
+  template:
+    metadata:
+      labels:
+        app: courier-service
+    spec:
+      containers:
+        - name: courier-service
+          image: courier-service:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 9092
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:mysql://host.docker.internal:3306/logistics_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
+            - name: SPRING_DATASOURCE_USERNAME
+              value: root
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: mysql-root-password
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+---
+# ============================
+# Service
+# ============================
+apiVersion: v1
+kind: Service
+metadata:
+  name: courier-service
+  namespace: lastmile
+spec:
+  selector:
+    app: courier-service
+  ports:
+    - port: 9092
+      targetPort: 9092
