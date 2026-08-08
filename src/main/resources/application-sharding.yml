@@ -1,0 +1,29 @@
+# ============================
+# 分片 profile — 激活 ShardingSphere
+# ============================
+# 用法：
+#   1. 本机：application-dev.yml 的 spring.profiles.include 加上 sharding
+#   2. 命令行：--spring.profiles.active=dev,sharding
+#   3. Docker：SPRING_PROFILES_ACTIVE=dev,sharding
+#
+# 注意：
+#   - 先执行 V8 迁移创建分片表
+#   - 再执行 scripts/migrate-to-shards.sql 迁移数据
+#   - 最后 RENAME TABLE orders TO orders_backup
+#   - 然后才能激活 sharding profile
+# ============================
+
+# ShardingSphere 配置已写在 ShardingConfig.java（Java Config），
+# 这里只放 profile 切换相关的非 ShardingSphere 设置。
+#
+# 为什么用 Java Config 而不是 YAML：
+#   ShardingSphere 的 Spring Boot Starter 可能不兼容 Spring Boot 4.0.5，
+#   用 shardingsphere-jdbc-core 手写 DataSource 创建最稳，
+#   而且每一步干什么都看得见，学习效果更好。
+
+logging:
+  level:
+    # 分片路由日志：看逻辑表 → 物理表转换
+    org.apache.shardingsphere: debug
+    # ShardingSphere 内部 SQL 改写细节
+    org.apache.shardingsphere.driver: trace

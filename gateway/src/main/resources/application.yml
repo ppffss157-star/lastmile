@@ -1,0 +1,49 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+        namespace:       # 空 = public
+
+    gateway:
+      # ============================
+      # 路由规则 — Nacos 服务发现模式
+      # ============================
+      # lb://service-name：Spring Cloud LoadBalancer 通过 Nacos 解析服务名 → 实例列表 → 负载均衡
+      # ============================
+      routes:
+        - id: order-service
+          uri: lb://order-service
+          predicates:
+            - Path=/api/orders/**,/api/saga/**
+          filters:
+            - AddResponseHeader=X-Service, order-service
+
+        - id: courier-service
+          uri: lb://courier-service
+          predicates:
+            - Path=/api/couriers/**
+          filters:
+            - AddResponseHeader=X-Service, courier-service
+
+      # ============================
+      # 全局 CORS
+      # ============================
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "*"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+            allowCredentials: true
+
+logging:
+  level:
+    com.example.logistics.gateway: debug
+    org.springframework.cloud.gateway: info

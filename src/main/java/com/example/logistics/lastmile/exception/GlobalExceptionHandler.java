@@ -40,6 +40,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.LOCKED).body(Result.fail(e.getMessage()));
     }
 
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<Result<String>> handleRateLimitExceeded(RateLimitExceededException e) {
+        return ResponseEntity.status(429)   // HTTP 429 Too Many Requests
+                .header("Retry-After", String.valueOf(e.getRetryAfterSeconds()))
+                .body(Result.fail(e.getMessage()));
+    }
+
     // ==================== 兜底异常 ====================
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -3,22 +3,24 @@ package com.example.logistics.lastmile.service;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
-import org.springframework.data.redis.core.script.DefaultRedisScript;
+import com.example.logistics.lastmile.config.RedisLuaScripts;
 
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.example.logistics.lastmile.dto.CreateOrderRequest;
 import com.example.logistics.lastmile.dto.OrderNotification;
+import com.example.logistics.lastmile.event.OrderStatusChangedEvent;
 import com.example.logistics.lastmile.entity.Courier;
 import com.example.logistics.lastmile.entity.CourierStatus;
 import com.example.logistics.lastmile.entity.Order;
@@ -28,21 +30,30 @@ import com.example.logistics.lastmile.exception.CourierNotAvailableException;
 import com.example.logistics.lastmile.exception.CourierNotFoundException;
 import com.example.logistics.lastmile.exception.IllegalStatusTransitionException;
 import com.example.logistics.lastmile.exception.OrderNotFoundException;
+import com.example.logistics.lastmile.messaging.OrderMessageProducer;
 import com.example.logistics.lastmile.repository.CourierRepository;
 import com.example.logistics.lastmile.repository.OrderRepository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
-@Transactional
 @RequiredArgsConstructor
 public class OrderService {
 
     private final OrderRepository orderRepository;
     private final CourierRepository courierRepository;
     private final StringRedisTemplate stringRedisTemplate;
-    private final SimpMessagingTemplate messagingTemplate; // WebSocket 消息推送
+    private final ApplicationEventPublisher eventPublisher;
+    private final OrderMessageProducer messageProducer;
+    private final CacheProtectionService cacheProtection;
 
+    // OrderSearchService 在 dev 环境不可用（需要 ES），通过 @Autowired(required=false) 注入
+    // 相关文件：OrderSearchService.java.bak, OrderSearchRepository.java.bak
+    // private OrderSearchService orderSearchService;  // 已临时移除
+
+    @Transactional(rollbackFor = Exception.class)
     public Order create(CreateOrderRequest request) {
         Order order = new Order();
         order.setCustomerName(request.getCustomerName());
@@ -52,29 +63,45 @@ public class OrderService {
         order.setCreatedAt(java.time.LocalDateTime.now());
 
         Order saved = orderRepository.save(order);
-        sendOrderStatusNotification(saved, "订单已创建");
+        eventPublisher.publishEvent(new OrderStatusChangedEvent(saved, "订单已创建"));
+        notify("订单已创建", saved);  // RabbitMQ 消息
+
+        // 新订单 ID 加入布隆过滤器 + 预热缓存
+        cacheProtection.onOrderCreated(saved);
         return saved;
     }
 
+    @Transactional(readOnly = true)
     public List<Order> findAll() {
         return orderRepository.findAll();
     }
 
+    @Transactional(readOnly = true)
     public Page<Order> findPage(int page, int size) {
         return orderRepository.findAll(PageRequest.of(page, size));
     }
 
-    @Cacheable(value = "order", key = "#id")
+    @Transactional(readOnly = true)
     public Order findById(Long id) {
-        return orderRepository.findById(id)
-                .orElseThrow(() -> new OrderNotFoundException());
+        // 走三层防护：布隆 → 缓存(带互斥锁) → DB
+        Order order = cacheProtection.queryById(id);
+        if (order == null) {
+            throw new OrderNotFoundException();
+        }
+        return order;
     }
 
+    @Transactional(readOnly = true)
     public List<Order> findByCourierId(Long courierId) {
         return orderRepository.findByCourierId(courierId);
     }
 
-    @CacheEvict(value = "order", key = "#id")
+    @Transactional(readOnly = true)
+    public Page<Order> findByCourierId(Long courierId, Pageable pageable) {
+        return orderRepository.findByCourierId(courierId, pageable);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public Order updateStatus(Long id, OrderStatus newStatus) {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new OrderNotFoundException());
@@ -87,23 +114,36 @@ public class OrderService {
             order.setStatus(newStatus);
         } else if (currentStatus == OrderStatus.DELIVERING && newStatus == OrderStatus.COMPLETED) {
             order.setStatus(newStatus);
+            // 订单完成，释放配送员
+            Courier courier = order.getCourier();
+            if (courier != null) {
+                courier.setStatus(CourierStatus.AVAILABLE);
+                courierRepository.save(courier);
+            }
         } else {
             throw new IllegalStatusTransitionException();
         }
 
         Order saved = orderRepository.save(order);
-        sendOrderStatusNotification(saved,
-                "订单状态变更: " + currentStatus + " → " + newStatus);
+        cacheProtection.evict(id);  // 状态变了，缓存失效
+        eventPublisher.publishEvent(new OrderStatusChangedEvent(saved,
+                "订单状态变更: " + currentStatus + " → " + newStatus));
+        notify("订单状态变更: " + currentStatus + " → " + newStatus, saved);
         return saved;
     }
 
-    @CacheEvict(value = "order", key = "#orderId")
+    @Transactional(rollbackFor = Exception.class)
     public Order assignCourier(Long orderId, Long courierId) {
-        // 1. 生成这把锁的唯一标识（UUID），防止误删别人的锁
+        // 1. 锁外：纯读操作不占锁，先查订单和配送员是否存在
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new OrderNotFoundException());
+
+        Courier courier = courierRepository.findById(courierId)
+                .orElseThrow(() -> new CourierNotFoundException());
+
+        // 2. 获取配送员锁——只保护"状态校验 + 修改"这段需要互斥的逻辑
         String lockKey = "lock:courier:" + courierId;
         String lockValue = UUID.randomUUID().toString();
-
-        // 2. 尝试获取锁：setIfAbsent = SETNX，10 秒后自动过期（防止死锁）
         Boolean locked = stringRedisTemplate.opsForValue()
                 .setIfAbsent(lockKey, lockValue, Duration.ofSeconds(10));
 
@@ -112,40 +152,32 @@ public class OrderService {
         }
 
         try {
-            // ===== 以下和原来一样：查订单、查配送员、校验、派单 =====
-            Order order = orderRepository.findById(orderId)
-                    .orElseThrow(() -> new OrderNotFoundException());
-
-            Courier courier = courierRepository.findById(courierId)
-                    .orElseThrow(() -> new CourierNotFoundException());
-
+            // 3. 锁内：re-check 状态（锁外读到的是快照，进来时可能已变）
             if (courier.getStatus() != CourierStatus.AVAILABLE) {
                 throw new CourierNotAvailableException();
             }
 
             order.setCourier(courier);
             order.setStatus(OrderStatus.ASSIGNED);
-
             courier.setStatus(CourierStatus.BUSY);
 
             courierRepository.save(courier);
             Order saved = orderRepository.save(order);
-            sendOrderStatusNotification(saved,
-                    "订单已分配给配送员 #" + courierId);
+            cacheProtection.evict(orderId);
+            eventPublisher.publishEvent(new OrderStatusChangedEvent(saved,
+                    "订单已分配给配送员 #" + courierId));
+            notify("订单已分配给配送员 #" + courierId, saved);
             return saved;
 
         } finally {
-            // 3. 原子释放锁：Lua 脚本把 get+判断+delete 打包发给 Redis 一口气执行
-            String script = "if redis.call('GET', KEYS[1]) == ARGV[1] then " +
-                            "return redis.call('DEL', KEYS[1]) else return 0 end";
             stringRedisTemplate.execute(
-                    new DefaultRedisScript<>(script, Long.class),
+                    RedisLuaScripts.RELEASE_LOCK,
                     List.of(lockKey),
                     lockValue);
         }
     }
 
-    @CacheEvict(value = "order", key = "#id")
+    @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRES_NEW)
     public Order cancelOrder(Long id) {
         Order order = orderRepository.findById(id)
                 .orElseThrow(() -> new OrderNotFoundException());
@@ -165,51 +197,59 @@ public class OrderService {
 
         order.setStatus(OrderStatus.CANCELLED);
         Order saved = orderRepository.save(order);
-        sendOrderStatusNotification(saved, "订单已取消");
+        cacheProtection.evict(id);  // 取消后缓存失效
+        eventPublisher.publishEvent(new OrderStatusChangedEvent(saved, "订单已取消"));
+        notify("订单已取消", saved);
         return saved;
     }
 
-    @CacheEvict(value = "order", key = "#id")
+    @Transactional(rollbackFor = Exception.class)
     public void deleteById(Long id) {
         if (!orderRepository.existsById(id)) {
             throw new OrderNotFoundException();
         }
 
         orderRepository.deleteById(id);
+        cacheProtection.evict(id);  // 删除后清除缓存
+        // ES 同步已临时移除（dev 环境无 ES），恢复时取消注释下面三行
+        // if (orderSearchService != null) {
+        //     orderSearchService.deleteById(id);
+        // }
     }
+
+    @Transactional(readOnly = true)
+    public Map<OrderStatus, Long> getOrderStats() {
+        return orderRepository.countByStatus().stream()
+                .collect(Collectors.toMap(
+                        row -> (OrderStatus) row[0],
+                        row -> (Long) row[1]
+                ));
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> findAllCustomerNames() {
+        return orderRepository.findDistinctCustomerNames();
+    }
+
+    // ==================== 内部方法 ====================
 
     /**
-     * 发送订单状态变更的 WebSocket 推送消息。
-     * <p>
-     * SimpMessagingTemplate 是 Spring 的消息推送中枢，一行代码就能
-     * 把任意 Java 对象（自动序列化为 JSON）发送到指定目的地。
-     * 所有订阅了该目的地的客户端都会立即收到消息。
-     *
-     * @param order 变更后的订单对象
-     * @param event 事件描述（如 "订单已创建"、"配送员已分配"）
+     * 构建 OrderNotification 并发送到 RabbitMQ。
+     * Spring Event（eventPublisher）负责 JVM 内部解耦，
+     * RabbitMQ（messageProducer）负责跨服务通知。
      */
-    private void sendOrderStatusNotification(Order order, String event) {
-        OrderNotification payload = new OrderNotification(
-                order.getId(),
-                order.getStatus().name(),
-                event,
-                LocalDateTime.now().toString());
-
-        // 推送到全局频道（所有订单列表页面都能收到）
-        messagingTemplate.convertAndSend("/topic/orders", payload);
-        // 同时推送到订单专属频道（仅查看该订单详情的页面能收到）
-        messagingTemplate.convertAndSend("/topic/orders/" + order.getId(), payload);
-    }
-
-    @Scheduled(fixedRate = 60000)
-    public void autoCancelStaleOrders() {
-        LocalDateTime threshold = LocalDateTime.now().minusMinutes(30);
-        List<Order> staleOrders = orderRepository
-                .findByStatusAndCreatedAtBefore(OrderStatus.CREATED, threshold);
-
-        for (Order order : staleOrders) {
-            order.setStatus(OrderStatus.CANCELLED);
-            orderRepository.save(order);
+    private void notify(String description, Order order) {
+        try {
+            OrderNotification notification = new OrderNotification(
+                    order.getId(),
+                    order.getStatus().name(),
+                    description,
+                    LocalDateTime.now().toString(),
+                    null);  // messageId 由 Producer 自动生成
+            messageProducer.sendOrderNotification(notification);
+        } catch (Exception e) {
+            // RabbitMQ 不可用不能影响业务，只打日志
+            log.warn("RabbitMQ 消息发送失败，不影响业务流程: {}", e.getMessage());
         }
     }
 }

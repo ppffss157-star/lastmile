@@ -7,23 +7,31 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.example.logistics.lastmile.dto.CreateOrderRequest;
+import com.example.logistics.lastmile.event.OrderStatusChangedEvent;
 import com.example.logistics.lastmile.entity.Courier;
 import com.example.logistics.lastmile.entity.CourierStatus;
 import com.example.logistics.lastmile.entity.Order;
@@ -31,6 +39,7 @@ import com.example.logistics.lastmile.entity.OrderStatus;
 import com.example.logistics.lastmile.exception.CourierLockedException;
 import com.example.logistics.lastmile.exception.CourierNotAvailableException;
 import com.example.logistics.lastmile.exception.OrderNotFoundException;
+import com.example.logistics.lastmile.messaging.OrderMessageProducer;
 import com.example.logistics.lastmile.repository.CourierRepository;
 import com.example.logistics.lastmile.repository.OrderRepository;
 
@@ -50,10 +59,25 @@ class OrderServiceTest {
     private ValueOperations<String, String> valueOperations;
 
     @Mock
-    private SimpMessagingTemplate messagingTemplate;
+    private ApplicationEventPublisher eventPublisher;
+
+    @Mock
+    private OrderMessageProducer messageProducer;
+
+    @Mock
+    private OrderSearchService orderSearchService;
+
+    @Mock
+    private CacheProtectionService cacheProtection;
 
     @InjectMocks
     private OrderService orderService;
+
+    @BeforeEach
+    void setUp() {
+        // @InjectMocks 不处理 @Autowired 字段，手动注入 self，绕过代理问题
+        ReflectionTestUtils.setField(orderService, "self", orderService);
+    }
 
     // ==================== 创建订单 ====================
 
@@ -75,6 +99,8 @@ class OrderServiceTest {
         assertNotNull(result.getId());
         assertEquals("张三", result.getCustomerName());
         assertEquals(OrderStatus.CREATED, result.getStatus());
+
+        verify(eventPublisher, atLeastOnce()).publishEvent(any(OrderStatusChangedEvent.class));
     }
 
     // ==================== 查询订单 ====================
@@ -83,7 +109,8 @@ class OrderServiceTest {
     void shouldFindByIdWhenExists() {
         Order order = new Order(1L, "李四", "上海", "13900000000", OrderStatus.CREATED, null, null);
 
-        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        // 三层防护返回缓存中的订单
+        when(cacheProtection.queryById(1L)).thenReturn(order);
 
         Order result = orderService.findById(1L);
 
@@ -92,7 +119,8 @@ class OrderServiceTest {
 
     @Test
     void shouldThrowWhenOrderNotFound() {
-        when(orderRepository.findById(999L)).thenReturn(Optional.empty());
+        // 布隆 + 缓存 + DB 都没找到
+        when(cacheProtection.queryById(999L)).thenReturn(null);
 
         assertThrows(OrderNotFoundException.class, () -> orderService.findById(999L));
     }
@@ -121,6 +149,8 @@ class OrderServiceTest {
         assertEquals(OrderStatus.ASSIGNED, result.getStatus());
         assertEquals(5L, result.getCourier().getId());
         assertEquals(CourierStatus.BUSY, courier.getStatus());
+
+        verify(eventPublisher, atLeastOnce()).publishEvent(any(OrderStatusChangedEvent.class));
     }
 
     @Test
@@ -173,6 +203,8 @@ class OrderServiceTest {
         Order result = orderService.cancelOrder(1L);
 
         assertEquals(OrderStatus.CANCELLED, result.getStatus());
+
+        verify(eventPublisher, atLeastOnce()).publishEvent(any(OrderStatusChangedEvent.class));
     }
 
     @Test
@@ -188,5 +220,83 @@ class OrderServiceTest {
 
         assertEquals(OrderStatus.CANCELLED, result.getStatus());
         assertEquals(CourierStatus.AVAILABLE, courier.getStatus());
+
+        verify(eventPublisher, atLeastOnce()).publishEvent(any(OrderStatusChangedEvent.class));
+    }
+
+    // ==================== 定时取消旧订单 ====================
+
+    @Test
+    void shouldAutoCancelOldOrders() {
+        // 准备一个 31 分钟前创建的 CREATED 订单（超过 30 分钟阈值）
+        Order oldOrder = new Order(1L, "张三", "北京", "138", OrderStatus.CREATED, null,
+                LocalDateTime.now().minusMinutes(31));
+
+        when(orderRepository.findByStatusAndCreatedAtBefore(eq(OrderStatus.CREATED), any(LocalDateTime.class)))
+                .thenReturn(List.of(oldOrder));
+        // cancelOrder 会先 findById
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(oldOrder));
+        when(orderRepository.save(any(Order.class))).thenReturn(oldOrder);
+
+        orderService.autoCancelOldOrders();
+
+        ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
+        verify(orderRepository).save(captor.capture());
+        assertEquals(OrderStatus.CANCELLED, captor.getValue().getStatus());
+        // 确认事件也发了（cancelOrder 里会发事件）
+        verify(eventPublisher).publishEvent(any(OrderStatusChangedEvent.class));
+    }
+
+    @Test
+    void shouldNotCancelRecentlyCreatedOrders() {
+        when(orderRepository.findByStatusAndCreatedAtBefore(eq(OrderStatus.CREATED), any(LocalDateTime.class)))
+                .thenReturn(List.of());
+
+        orderService.autoCancelOldOrders();
+
+        verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    // ==================== Stream：订单统计 & 客户名单 ====================
+
+    @Test
+    void shouldGroupOrdersByStatus() {
+        Order o1 = new Order(1L, "张三", "北京", "138", OrderStatus.CREATED, null, null);
+        Order o2 = new Order(2L, "李四", "上海", "139", OrderStatus.CREATED, null, null);
+        Order o3 = new Order(3L, "王五", "广州", "137", OrderStatus.COMPLETED, null, null);
+
+        when(orderRepository.findAll()).thenReturn(List.of(o1, o2, o3));
+
+        Map<OrderStatus, Long> stats = orderService.getOrderStats();
+
+        assertEquals(2L, stats.get(OrderStatus.CREATED));   // 张三 + 李四
+        assertEquals(1L, stats.get(OrderStatus.COMPLETED)); // 王五
+    }
+
+    @Test
+    void shouldReturnDistinctSortedCustomerNames() {
+        Order o1 = new Order(1L, "张三", "北京", "138", OrderStatus.CREATED, null, null);
+        Order o2 = new Order(2L, "李四", "上海", "139", OrderStatus.CREATED, null, null);
+        Order o3 = new Order(3L, "张三", "深圳", "136", OrderStatus.ASSIGNED, null, null); // 重名
+        Order o4 = new Order(4L, "阿三", "杭州", "135", OrderStatus.COMPLETED, null, null);
+
+        when(orderRepository.findAll()).thenReturn(List.of(o1, o2, o3, o4));
+
+        List<String> names = orderService.findAllCustomerNames();
+
+        assertEquals(3, names.size());               // 张三去重了
+        // String::compareTo 按 Unicode 码点排序，不是拼音
+        assertEquals("张三", names.get(0));          // 张
+        assertEquals("李四", names.get(1));          // 李
+        assertEquals("阿三", names.get(2));          // 阿
+    }
+
+    @Test
+    void shouldReturnEmptyListWhenNoOrders() {
+        when(orderRepository.findAll()).thenReturn(List.of());
+
+        List<String> names = orderService.findAllCustomerNames();
+
+        assertEquals(0, names.size());
     }
 }

@@ -33,6 +33,7 @@ public class Order implements Serializable {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    // 分片模式下 ShardingSphere Snowflake 会覆盖此策略，非分片模式正常自增
     private Long id;
 
     private String customerName;

@@ -1,0 +1,42 @@
+package com.example.logistics.lastmile.repository;
+
+import java.util.List;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.elasticsearch.repository.ElasticsearchRepository;
+
+import com.example.logistics.lastmile.entity.OrderDocument;
+
+/**
+ * Spring Data Elasticsearch 会自动实现这些方法，和 JPA Repository 一样的套路。
+ * 方法名解析规则：findBy + 字段 + 操作符 → 自动生成 ES 查询。
+ */
+public interface OrderSearchRepository extends ElasticsearchRepository<OrderDocument, Long> {
+
+    /**
+     * 客户名模糊搜索（分页）
+     */
+    Page<OrderDocument> findByCustomerNameContaining(String keyword, Pageable pageable);
+
+    /**
+     * 地址模糊搜索
+     */
+    Page<OrderDocument> findByAddressContaining(String keyword, Pageable pageable);
+
+    /**
+     * 按手机号精确搜索
+     */
+    List<OrderDocument> findByPhone(String phone);
+
+    /**
+     * 按状态精确搜索（分页）
+     */
+    Page<OrderDocument> findByStatus(String status, Pageable pageable);
+
+    /**
+     * 客户名或地址包含关键词（全文搜索的核心，命中任一字段即返回）
+     */
+    Page<OrderDocument> findByCustomerNameContainingOrAddressContaining(
+            String customerKeyword, String addressKeyword, Pageable pageable);
+}

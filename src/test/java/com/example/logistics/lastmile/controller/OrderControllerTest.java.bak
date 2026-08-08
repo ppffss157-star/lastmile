@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -23,6 +24,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -41,6 +43,14 @@ class OrderControllerTest {
 
     @MockitoBean
     private OrderService orderService;
+
+    /** @WebMvcTest 不加载 Elasticsearch，Mock 避免自动注入失败 */
+    @MockitoBean
+    private com.example.logistics.lastmile.service.OrderSearchService orderSearchService;
+
+    /** @WebMvcTest 不加载 Redis，Mock 给 RateLimitInterceptor 用的 */
+    @MockitoBean
+    private StringRedisTemplate stringRedisTemplate;
 
     @Test
     void shouldCreateOrder() throws Exception {
@@ -132,6 +142,35 @@ class OrderControllerTest {
         mockMvc.perform(post("/orders")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(invalidJson))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void shouldUpdateOrderStatus() throws Exception {
+        Order order = new Order(1L, "张三", "北京", "138", OrderStatus.DELIVERING, null, LocalDateTime.now());
+        when(orderService.updateStatus(eq(1L), eq(OrderStatus.DELIVERING))).thenReturn(order);
+
+        String json = """
+                {"status": "DELIVERING"}
+                """;
+
+        mockMvc.perform(put("/orders/1/status")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.status").value("DELIVERING"));
+    }
+
+    @Test
+    void shouldReturn400WhenUpdateStatusWithNull() throws Exception {
+        String json = """
+                {}
+                """;
+
+        mockMvc.perform(put("/orders/1/status")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json))
                 .andExpect(status().isBadRequest());
     }
 }

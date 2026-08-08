@@ -11,6 +11,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+import com.example.logistics.lastmile.util.JwtUtil;
+
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
@@ -22,22 +24,24 @@ public class SecurityConfig {
 
     @Bean
     public WebSecurityCustomizer webSecurityCustomizer() {
-        // Swagger、WebSocket、Actuator（Prometheus 端点）不需要 JWT
-        // 生产环境应该单独保护 /actuator，比如只允许内网 IP 访问
+        // Swagger、WebSocket 不需要 JWT
+        // Actuator 移到 SecurityFilterChain 里分层控制：health + prometheus 公开，其余需认证
         return web -> web.ignoring().requestMatchers(
-                "/swagger-ui/**", "/v3/api-docs/**", "/ws/**", "/actuator/**");
+                "/swagger-ui/**", "/v3/api-docs/**", "/ws/**");
     }
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtUtil jwtUtil) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/auth/login", "/auth/refresh", "/ws/**", "/websocket-test.html").permitAll()
+                .requestMatchers("/auth/login", "/auth/refresh", "/ws/**", "/websocket-test.html", "/api/saga/**").permitAll()
+                .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
+                .requestMatchers("/actuator/**").authenticated()
                 .anyRequest().authenticated()
             )
-            .addFilterBefore(new JwtFilter(), UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(new JwtFilter(jwtUtil), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

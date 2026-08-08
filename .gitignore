@@ -22,3 +22,11 @@ logs/
 .env
 .env.local
 nul
+
+# Claude (local only)
+.claude/settings.local.json
+
+# Local trash
+HKLM/
+项目记录/
+*.lnk

@@ -1,0 +1,179 @@
+package com.example.logistics.lastmile.service;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.transaction.UnexpectedRollbackException;
+
+import com.example.logistics.lastmile.config.NacosServiceRegistry;
+
+/**
+ * <h1>事务传播行为——用测试证明每种行为</h1>
+ *
+ * <h2>真实写入 MySQL 验证</h2>
+ * 每个场景<b>实际写库</b>，查 count 验证谁提交了、谁回滚了。
+ * 测试方法不加 @Transactional，让 Service 的事务独立运作。
+ *
+ * <h2>Mock 的 Bean</h2>
+ * 这个测试只需要 JPA + 事务管理。ES/Nacos/Redis/RabbitMQ/WebSocket
+ * 的全 mock 掉——跟事务演示无关，只是为了让 Spring 上下文能启动。
+ */
+@SpringBootTest(properties = {
+    "spring.profiles.active=dev",
+    "spring.autoconfigure.exclude="
+        // ES
+        + "org.springframework.boot.elasticsearch.autoconfigure.ElasticsearchClientAutoConfiguration,"
+        + "org.springframework.boot.elasticsearch.autoconfigure.ElasticsearchRestClientAutoConfiguration,"
+        + "org.springframework.boot.data.elasticsearch.autoconfigure.DataElasticsearchAutoConfiguration,"
+        + "org.springframework.boot.data.elasticsearch.autoconfigure.DataElasticsearchRepositoriesAutoConfiguration,"
+        // RabbitMQ（测试不需要消息队列）
+        + "org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration,"
+        // WebSocket（测试不需要推送）
+        + "org.springframework.boot.autoconfigure.websocket.servlet.WebSocketServletAutoConfiguration",
+    // 不让 Redis 连接失败导致上下文崩溃
+    "spring.redis.host=localhost",
+    "spring.redis.timeout=100ms",
+    "spring.redis.connect-timeout=100ms"
+})
+@Import(TransactionDemoServiceTest.TestConfig.class)
+@DisplayName("事务传播行为验证")
+class TransactionDemoServiceTest {
+
+    @Autowired
+    private TransactionDemoService service;
+
+    @BeforeEach
+    void setUp() {
+        service.deleteAll();
+    }
+
+    @AfterEach
+    void tearDown() {
+        service.deleteAll();
+    }
+
+    /**
+     * Mock 掉跟事务演示无关的 Bean，让 Spring 上下文能启动。
+     * 注意：只是 @Primary 覆盖，真正的 Bean 仍然会被创建（需要它的依赖可用）。
+     */
+    @TestConfiguration
+    static class TestConfig {
+
+        @Bean
+        @Primary
+        com.example.logistics.lastmile.repository.OrderSearchRepository mockOrderSearchRepository() {
+            return mock(com.example.logistics.lastmile.repository.OrderSearchRepository.class);
+        }
+
+        @Bean
+        @Primary
+        NacosServiceRegistry mockNacosServiceRegistry() {
+            return mock(NacosServiceRegistry.class);
+        }
+
+        @Bean
+        @Primary
+        CacheProtectionService mockCacheProtectionService() {
+            return mock(CacheProtectionService.class);
+        }
+
+        @Bean
+        @Primary
+        MessageDedupService mockMessageDedupService() {
+            return mock(MessageDedupService.class);
+        }
+
+        // 下面两个是 CacheProtectionService 的依赖（原始 Bean 还需要创建，只是不用）
+        @Bean
+        @Primary
+        com.fasterxml.jackson.databind.ObjectMapper mockObjectMapper() {
+            return new com.fasterxml.jackson.databind.ObjectMapper();
+        }
+
+        @Bean
+        @Primary
+        org.springframework.data.redis.core.StringRedisTemplate mockStringRedisTemplate() {
+            return mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+        }
+    }
+
+    // ========================================================================
+    // 场景 1：REQUIRED + REQUIRED → 内层失败，全部回滚
+    // ========================================================================
+
+    @Test
+    @DisplayName("场景1: REQUIRED 内层抛异常 → UnexpectedRollbackException")
+    void scenario1_requiredInnerFail_shouldRollbackBoth() {
+        assertThrows(UnexpectedRollbackException.class,
+                () -> service.scenario1_requiredRequired_innerFail(),
+                "内层异常标记了 rollback-only，外层 catch 了也提交不了！");
+
+        assertEquals(0, service.countAll(), "两条记录都应该回滚了");
+    }
+
+    // ========================================================================
+    // 场景 2：REQUIRED + REQUIRES_NEW → 内层失败，外层独立提交
+    // ========================================================================
+
+    @Test
+    @DisplayName("场景2: REQUIRES_NEW 内层抛异常 → 外层正常提交")
+    void scenario2_requiresNewInnerFail_shouldCommitOuter() {
+        String result = service.scenario2_requiredRequiresNew_innerFail();
+
+        assertTrue(result.contains("外层提交成功"), "外层应该正常提交");
+        assertEquals(1, service.countAll(), "外层记录存在，内层的回滚了");
+    }
+
+    // ========================================================================
+    // 场景 3：REQUIRES_NEW 内层成功 → 外层失败，内层不受影响
+    // ========================================================================
+
+    @Test
+    @DisplayName("场景3: 内层 REQUIRES_NEW 提交 → 外层失败，内层数据还在")
+    void scenario3_outerFails_innerCommitted() {
+        assertThrows(RuntimeException.class,
+                () -> service.scenario3_outerFails_innerCommitted(),
+                "外层应该抛异常");
+
+        assertEquals(1, service.countAll(), "内层独立提交，外层回滚不影响它");
+    }
+
+    // ========================================================================
+    // 场景 4：rollback-only 陷阱
+    // ========================================================================
+
+    @Test
+    @DisplayName("场景4: 内层抛异常 → try-catch 也救不了")
+    void scenario4_rollbackOnlyTrap() {
+        assertThrows(UnexpectedRollbackException.class,
+                () -> service.scenario4_rollbackOnlyTrap(),
+                "UnexpectedRollbackException！");
+
+        assertEquals(0, service.countAll(), "全部回滚");
+    }
+
+    // ========================================================================
+    // 场景 5：REQUIRES_NEW 的隔离性
+    // ========================================================================
+
+    @Test
+    @DisplayName("场景5: 验证 REQUIRES_NEW 真的挂起了外层事务")
+    void scenario5_requiresNewIsolation() {
+        service.scenario3_innerRequiresNew_commit();
+        service.scenario3_innerRequiresNew_commit();
+
+        assertEquals(2, service.countAll(), "各自独立提交，互不干扰");
+    }
+}

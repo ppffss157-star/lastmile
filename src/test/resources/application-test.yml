@@ -1,0 +1,28 @@
+# ============================
+# 测试环境 — TestContainers 提供真实 MySQL + Redis
+# 数据库/Redis 连接由 @DynamicPropertySource 动态注入，不写死
+# ============================
+jwt:
+  secret: test-secret-key-at-least-256-bits-long-enough-for-hs256
+
+spring:
+  jpa:
+    show-sql: true             # 测试看 SQL 方便排查
+
+  flyway:
+    enabled: true              # Flyway 接管建表
+
+  # 集成测试没有 ES 容器，排除 ES 自动配置（避免连不上 ES 导致上下文加载失败）
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.elasticsearch.autoconfigure.ElasticsearchClientAutoConfiguration
+      - org.springframework.boot.elasticsearch.autoconfigure.ElasticsearchRestClientAutoConfiguration
+      - org.springframework.boot.data.elasticsearch.autoconfigure.DataElasticsearchAutoConfiguration
+      - org.springframework.boot.data.elasticsearch.autoconfigure.DataElasticsearchRepositoriesAutoConfiguration
+
+logging:
+  level:
+    com.example.logistics: debug
+    # 容器启动时日志太多，只开 WARN
+    org.testcontainers: warn
+    com.github.dockerjava: warn

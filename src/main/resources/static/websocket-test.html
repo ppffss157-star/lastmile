@@ -86,7 +86,7 @@
     <div class="tip">
         <strong>💡 怎么测试？</strong><br>
         1. 点「连接」按钮<br>
-        2. 另开 Swagger：<code>http://localhost:8080/swagger-ui/index.html</code><br>
+        2. 另开 Swagger：<code>http://localhost:9090/swagger-ui/index.html</code><br>
         3. 先登录获取 Token，然后创建订单、派单、更新状态<br>
         4. 观察这个页面的实时日志变化 ✨
     </div>
@@ -106,7 +106,7 @@
 
         function connect() {
             // 1. 创建 SockJS 连接 → 自动处理 WebSocket 降级
-            var socket = new SockJS('http://localhost:8080/ws');
+            var socket = new SockJS('http://localhost:9090/ws');
             // 2. 在 SockJS 之上封装 STOMP 协议
             stompClient = Stomp.over(socket);
 

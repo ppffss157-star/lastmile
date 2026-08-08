@@ -1,0 +1,57 @@
+# ============================================================
+# CI 流水线：每次 push / PR 自动编译 + 跑测试
+# ============================================================
+# 比喻：代码推上去 → 自动化厨房开工 → 装 JDK（备菜）
+# → 缓存 Maven 依赖（冰箱里有食材不重买）→ 跑测试（验菜）
+# → 全绿 = 菜 OK，红了 = 快修
+# ============================================================
+
+name: Java CI with Maven
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+# 同一个分支上的新 push 会自动取消旧的运行中任务
+# （避免改了一个 typo 还排队等旧的那个跑完）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: "JDK ${{ matrix.java }} — 编译 + 测试"
+    runs-on: ubuntu-latest
+
+    strategy:
+      # 一个版本挂了不影响另一个继续跑
+      fail-fast: false
+      matrix:
+        java: [17, 21]
+
+    steps:
+      # ──── 1. 拉代码 ────
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      # ──── 2. 装 JDK + Maven 缓存 ────
+      # cache: 'maven' 自动把 ~/.m2 缓存起来，
+      # 下次构建不用重新下载依赖，5 分钟 → 30 秒
+      - name: 安装 JDK ${{ matrix.java }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      # ──── 3. 确保 mvnw 可执行 ────
+      # Windows 上 git clone 下来的脚本可能丢执行权限
+      - name: 赋予 mvnw 执行权限
+        run: chmod +x ./mvnw
+
+      # ──── 4. 编译 + 跑所有测试 ────
+      # test 阶段自动包含 compile，不需要单独 compile
+      - name: 编译 & 测试
+        run: ./mvnw test --batch-mode --no-transfer-progress

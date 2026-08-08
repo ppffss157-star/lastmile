@@ -1,0 +1,58 @@
+package com.example.logistics.lastmile.event;
+
+import org.springframework.context.annotation.Profile;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
+
+import com.example.logistics.lastmile.entity.Order;
+import com.example.logistics.lastmile.entity.OrderDocument;
+import com.example.logistics.lastmile.service.OrderSearchService;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * 监听订单变更事件，异步同步到 Elasticsearch。
+ *
+ * <p>设计要点：
+ * <ul>
+ *   <li>{@code @TransactionalEventListener} — 等事务提交成功后才触发，回滚了不触发</li>
+ *   <li>{@code @Async} — 扔后台线程执行，不拖慢接口响应</li>
+ *   <li>try-catch 兜底 — ES 挂了不影响业务流程（和 RabbitMQ 一样策略）</li>
+ * </ul>
+ *
+ * <p>为什么不用 @AfterReturning AOP？
+ * AOP 拿不到"事务是否已提交"的信息（事务可能在 commit 阶段失败）。
+ * TransactionalEventListener 只在 commit 后触发，比 AOP 安全。
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+@Profile("!dev")
+public class OrderElasticsearchSyncListener {
+
+    private final OrderSearchService orderSearchService;
+
+    /**
+     * 订单创建/更新 → 同步到 ES。
+     * phase = AFTER_COMMIT：事务提交后才执行，回滚了不执行。
+     */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onOrderChanged(OrderStatusChangedEvent event) {
+        Order order = event.getOrder();
+        OrderDocument doc = OrderDocument.builder()
+                .id(order.getId())
+                .customerName(order.getCustomerName())
+                .address(order.getAddress())
+                .phone(order.getPhone())
+                .status(order.getStatus().name())
+                .courierId(order.getCourier() != null ? order.getCourier().getId() : null)
+                .courierName(order.getCourier() != null ? order.getCourier().getName() : null)
+                .createdAt(order.getCreatedAt().toString())
+                .build();
+        orderSearchService.save(doc);
+    }
+}

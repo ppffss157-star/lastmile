@@ -20,7 +20,7 @@ public class CourierService {
 
     private final CourierRepository courierRepository;
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Courier create(CreateCourierRequest request) {
         Courier courier = new Courier();
         courier.setName(request.getName());
@@ -39,18 +39,23 @@ public class CourierService {
                 .orElseThrow(() -> new CourierNotFoundException());
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Courier update(Long id, UpdateCourierRequest request) {
         Courier courier = courierRepository.findById(id)
                 .orElseThrow(() -> new CourierNotFoundException());
 
-        courier.setName(request.getName());
-        courier.setPhone(request.getPhone());
+        // 部分更新：只改传了值的字段，不传的不动
+        if (request.getName() != null) {
+            courier.setName(request.getName());
+        }
+        if (request.getPhone() != null) {
+            courier.setPhone(request.getPhone());
+        }
 
         return courierRepository.save(courier);
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void deleteById(Long id) {
         if (!courierRepository.existsById(id)) {
             throw new CourierNotFoundException();

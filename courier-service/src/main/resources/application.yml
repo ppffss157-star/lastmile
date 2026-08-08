@@ -1,0 +1,39 @@
+server:
+  port: 9092
+
+spring:
+  application:
+    name: courier-service
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+        namespace:
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/logistics_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+# ============================
+# Micrometer Tracing — Zipkin
+# ============================
+management:
+  tracing:
+    sampling:
+      probability: 1.0       # 开发环境全采样
+  zipkin:
+    tracing:
+      endpoint: http://localhost:9411/api/v2/spans
+
+logging:
+  level:
+    com.example.courier: debug
+    zipkin2: debug
+    io.micrometer.tracing: debug

@@ -9,6 +9,7 @@ import org.springframework.web.client.RestClient;
 
 import com.example.order.entity.Order;
 import com.example.order.entity.OrderStatus;
+import com.example.order.exception.OrderNotFoundException;
 import com.example.order.repository.OrderRepository;
 
 import io.github.resilience4j.bulkhead.annotation.Bulkhead;
@@ -51,7 +52,7 @@ public class OrderService {
     @Transactional(readOnly = true)
     public Order findById(Long id) {
         return orderRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("订单不存在: " + id));
+                .orElseThrow(() -> new OrderNotFoundException(id));
     }
 
     /**

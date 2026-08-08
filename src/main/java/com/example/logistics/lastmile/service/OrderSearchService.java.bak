@@ -1,0 +1,92 @@
+package com.example.logistics.lastmile.service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Service;
+
+import com.example.logistics.lastmile.entity.OrderDocument;
+import com.example.logistics.lastmile.repository.OrderSearchRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * 封装 ES 搜索逻辑，Controller 只负责接收参数、调 Service、返回结果。
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+@Profile("!dev")
+public class OrderSearchService {
+
+    private final OrderSearchRepository orderSearchRepository;
+
+    /**
+     * 多字段全文搜索：客户名 + 地址。
+     * 按创建时间倒序，最新的订单排前面。
+     */
+    public Page<OrderDocument> search(String keyword, int page, int size) {
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        log.debug("ES 搜索: keyword={}, page={}, size={}", keyword, page, size);
+        return orderSearchRepository.findByCustomerNameContainingOrAddressContaining(
+                keyword, keyword, pageable);
+    }
+
+    /**
+     * 按状态搜索（精确匹配）
+     */
+    public Page<OrderDocument> searchByStatus(String status, int page, int size) {
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return orderSearchRepository.findByStatus(status, pageable);
+    }
+
+    /**
+     * 按手机号精确搜索
+     */
+    public List<OrderDocument> searchByPhone(String phone) {
+        return orderSearchRepository.findByPhone(phone);
+    }
+
+    /**
+     * 同步 MySQL 订单到 ES（有则更新，无则插入）
+     */
+    public void save(OrderDocument doc) {
+        try {
+            orderSearchRepository.save(doc);
+            log.debug("ES 同步成功: orderId={}", doc.getId());
+        } catch (Exception e) {
+            log.warn("ES 同步失败（不影响业务）: orderId={}, error={}", doc.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 从 ES 删除订单
+     */
+    public void deleteById(Long orderId) {
+        try {
+            orderSearchRepository.deleteById(orderId);
+            log.debug("ES 删除成功: orderId={}", orderId);
+        } catch (Exception e) {
+            log.warn("ES 删除失败（不影响业务）: orderId={}, error={}", orderId, e.getMessage());
+        }
+    }
+
+    /**
+     * 全量重建索引（从 MySQL 导入所有数据到 ES）。
+     * 用于首次上线或 ES 数据丢失后的恢复。
+     */
+    public void rebuildIndex(List<OrderDocument> allOrders) {
+        try {
+            orderSearchRepository.saveAll(allOrders);
+            log.info("ES 索引重建完成，共 {} 条", allOrders.size());
+        } catch (Exception e) {
+            log.error("ES 索引重建失败: {}", e.getMessage());
+        }
+    }
+}

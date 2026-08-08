@@ -1,7 +1,6 @@
 package com.example.logistics.lastmile.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -150,6 +149,46 @@ class CourierServiceTest {
 
         // 配送员不存在，不应该调用 save
         verify(courierRepository, never()).save(any());
+    }
+
+    @Test
+    void shouldUpdateOnlyNameWhenPhoneNotProvided() {
+        // Given：原配送员电话是 "138"
+        Courier existing = new Courier(1L, "张三", "138", CourierStatus.AVAILABLE, null);
+        when(courierRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(courierRepository.save(any(Courier.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // 只传名字，不传电话
+        UpdateCourierRequest request = new UpdateCourierRequest();
+        request.setName("张三丰");
+        request.setPhone(null);
+
+        // When
+        Courier result = courierService.update(1L, request);
+
+        // Then：名字更新了，电话保持原样
+        assertEquals("张三丰", result.getName());
+        assertEquals("138", result.getPhone());
+    }
+
+    @Test
+    void shouldUpdateOnlyPhoneWhenNameNotProvided() {
+        // Given：原配送员名字是 "张三"
+        Courier existing = new Courier(1L, "张三", "138", CourierStatus.AVAILABLE, null);
+        when(courierRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(courierRepository.save(any(Courier.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // 只传电话，不传名字
+        UpdateCourierRequest request = new UpdateCourierRequest();
+        request.setName(null);
+        request.setPhone("13600000000");
+
+        // When
+        Courier result = courierService.update(1L, request);
+
+        // Then：电话更新了，名字保持原样
+        assertEquals("张三", result.getName());
+        assertEquals("13600000000", result.getPhone());
     }
 
     // ==================== 删除配送员 ====================

@@ -73,11 +73,13 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/logistics_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: 123456
-      COURIER_SERVICE_URL: http://courier-service:9092
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
     depends_on:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      nacos:
         condition: service_healthy
 
   # ===== 骑手服务（微服务） =====
@@ -91,10 +93,13 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/logistics_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf8&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: 123456
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
     depends_on:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      nacos:
         condition: service_healthy
 
   # ===== API 网关 — 统一入口 =====
@@ -105,12 +110,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # 路由到微服务（容器名 = 主机名）
-      SPRING_CLOUD_GATEWAY_ROUTES_0_URI: http://order-service:9091
-      SPRING_CLOUD_GATEWAY_ROUTES_1_URI: http://courier-service:9092
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
     depends_on:
       - order-service
       - courier-service
+      - nacos
 
   # ===== RabbitMQ — 消息队列 =====
   rabbitmq:

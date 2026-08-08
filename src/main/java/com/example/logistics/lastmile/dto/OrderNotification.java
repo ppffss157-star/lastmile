@@ -8,10 +8,12 @@ package com.example.logistics.lastmile.dto;
  * @param status    当前状态
  * @param event     事件描述（如"订单已创建"）
  * @param timestamp 推送时间
+ * @param messageId 消息唯一标识（UUID），消费者用来做幂等去重
  */
 public record OrderNotification(
         Long orderId,
         String status,
         String event,
-        String timestamp) {
+        String timestamp,
+        String messageId) {
 }

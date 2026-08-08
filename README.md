@@ -2,6 +2,7 @@
 
 ![Java](https://img.shields.io/badge/Java-17-blue)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.5-brightgreen)
+![CI](https://github.com/ppffss157-star/lastmile/actions/workflows/ci.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 A production-ready logistics order management REST API built with **Spring Boot 4.0.5** and **Java 17**. Features JWT authentication, Redis distributed caching and locking, AOP logging, WebSocket real-time push, scheduled tasks, and comprehensive unit tests.

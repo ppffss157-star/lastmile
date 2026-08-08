@@ -44,7 +44,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     /**
      * 注册 STOMP 端点——客户端 WebSocket 握手时的连接 URL。
-     * 例如：客户端连接 ws://localhost:8080/ws
+     * 例如：客户端连接 ws://localhost:9090/ws
      *
      * <p>withSockJS()：降级方案。如果浏览器或网络不支持 WebSocket，
      * SockJS 自动回退到 XHR 轮询、JSONP 等方案，确保消息推送总能工作。
